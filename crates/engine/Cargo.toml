@@ -1,0 +1,24 @@
+[package]
+name = "project-fracta-oxidized"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bevy = { version = "0.20.1", default-features = false, features = [
+    # Core User-Facing Subsystems
+    "bevy_winit",          # Cross-platform window creation and OS shell loops
+    "bevy_ui",             # ECS-driven user interface framework & text rendering
+    "bevy_audio",          # Audio playback infrastructure
+    "vorbis",              # Standard audio format codec (ogg) for sounds/music
+    "bevy_asset",          # Required for loading 3D meshes, UI fonts, and audio tracks
+
+    # Core Graphics Systems
+    "bevy_render",         # Core GPU rendering pipelines
+    "bevy_core_pipeline",  # Essential drawing paths (clear colors, basic cameras)
+    "bevy_pbr",            # Physically Based Rendering for 3D engine meshes
+
+    # Desktop Window Compositors & Backends
+    "wayland",             # Native Linux Wayland protocol support
+    "x11",                 # Fallback Linux X11 display server support
+] }
+rapier3d = "0.36.1"
