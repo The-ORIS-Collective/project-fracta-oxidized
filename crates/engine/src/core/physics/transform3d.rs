@@ -127,11 +127,11 @@ impl Transform3D {
     pub fn delta_to(&self, other: &Self) -> [f64; 3] {
         let chunk_size = CHUNK_SIZE as f64;
         [
-            (other.chunk[0] - self.chunk[0]) as f64 * chunk_size
+            (other.chunk[0] as f64 - self.chunk[0] as f64) * chunk_size
                 + (other.position[0] as f64 - self.position[0] as f64),
-            (other.chunk[1] - self.chunk[1]) as f64 * chunk_size
+            (other.chunk[1] as f64 - self.chunk[1] as f64) * chunk_size
                 + (other.position[1] as f64 - self.position[1] as f64),
-            (other.chunk[2] - self.chunk[2]) as f64 * chunk_size
+            (other.chunk[2] as f64 - self.chunk[2] as f64) * chunk_size
                 + (other.position[2] as f64 - self.position[2] as f64),
         ]
     }
