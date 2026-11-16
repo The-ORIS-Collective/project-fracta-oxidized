@@ -48,9 +48,7 @@ impl Plugin for EnginePlugin {
 pub mod prelude {
     pub use crate::core::bevy_bridge::{sync_tree_with_bevy, GameTree};
     pub use crate::core::physics::{ColliderShape, PhysicsBodyType, Transform3D, CHUNK_SIZE};
-    pub use crate::core::scene::{
-        MeshShape, ObjectBehavior, ObjectId, ObjectTree, RenderCommand, TreeCommand, TreeContext,
-    };
+    pub use crate::core::scene::*;
     pub use crate::objects::*;
     pub use crate::EnginePlugin;
     pub use crate::core::input::InputSnapshot;

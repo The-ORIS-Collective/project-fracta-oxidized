@@ -5,7 +5,7 @@ pub struct Player6DoF {
     pub body: RigidBody3D,
     pub current_linvel: Vec3,
     pub current_angvel: Vec3,
-    pub move_speed: f32,
+    pub acceleration: f32,
     pub boost_multiplier: f32,
     pub linear_damping: f32,
     pub roll_speed: f32,
@@ -19,9 +19,9 @@ impl Player6DoF {
             body: RigidBody3D::new(ColliderShape::Ball { radius: 1.0 }, 5.0),
             current_linvel: Vec3::ZERO,
             current_angvel: Vec3::ZERO,
-            move_speed: 20.0,
+            acceleration: 40.0,
             boost_multiplier: 5.0,
-            linear_damping: 6.0,
+            linear_damping: 0.0,
             roll_speed: 2.2,
             mouse_sensitivity: 0.005,
             pending_mouse_delta: Vec2::ZERO,
@@ -39,6 +39,12 @@ impl ObjectBehavior for Player6DoF {
     }
 
     fn fixed_tick(&mut self, id: ObjectId, delta: f32, ctx: &mut TreeContext) {
+        // 0. Sync with the physics engine's actual velocity after any collisions
+        // (Adjust this line to match your engine's getter, e.g., ctx.get_velocity(id) or self.body.linear_velocity())
+        if let Some((linvel, _angvel)) = ctx.get_velocity(id) {
+            self.current_linvel = linvel;
+        }
+
         let rot = Quat::from_array(self.body.transform.rotation);
         let mouse_delta = std::mem::take(&mut self.pending_mouse_delta);
 
@@ -63,28 +69,30 @@ impl ObjectBehavior for Player6DoF {
             local_wish.y -= 1.0;
         }
 
-        if local_wish.length_squared() > 0.0 {
-            local_wish = local_wish.normalize();
-        }
-
-        let speed = if ctx.input.is_key_pressed(KeyCode::ShiftLeft) {
-            self.move_speed * self.boost_multiplier
+        let accel = if ctx.input.is_key_pressed(KeyCode::ShiftLeft) {
+            self.acceleration * self.boost_multiplier
         } else {
-            self.move_speed
+            self.acceleration
         };
 
-        // Transform local wish direction into world velocity and smoothly interpolate
-        let target_world_vel = (rot * local_wish) * speed;
-        self.current_linvel = self
-            .current_linvel
-            .lerp(target_world_vel, (self.linear_damping * delta).min(1.0));
+        // Add thruster acceleration onto the post-collision velocity
+        if local_wish.length_squared() > 0.0 {
+            local_wish = local_wish.normalize();
+            let world_accel = (rot * local_wish) * accel;
+            self.current_linvel += world_accel * delta;
+        }
+
+        // Apply custom damping only if > 0.0
+        if self.linear_damping > 0.0 {
+            self.current_linvel *= (1.0 - self.linear_damping * delta).max(0.0);
+        }
 
         // 2. 6DoF Local Rotation (Mouse to Pitch/Yaw + Q/E to Roll)
         let mut local_torque = Vec3::ZERO;
         if delta > 0.0 {
             let mouse_angular_speed = self.mouse_sensitivity / delta;
-            local_torque.y -= mouse_delta.x * mouse_angular_speed; // Local Yaw
-            local_torque.x -= mouse_delta.y * mouse_angular_speed; // Local Pitch
+            local_torque.y -= mouse_delta.x * mouse_angular_speed;
+            local_torque.x -= mouse_delta.y * mouse_angular_speed;
         }
         if ctx.input.is_key_pressed(KeyCode::KeyQ) {
             local_torque.z += self.roll_speed;
@@ -93,11 +101,11 @@ impl ObjectBehavior for Player6DoF {
             local_torque.z -= self.roll_speed;
         }
 
-        // Transform local angular velocity into world space for Rapier
         let target_world_angvel = rot * local_torque;
         self.current_angvel = target_world_angvel;
         ctx.set_velocity(id, self.current_linvel, self.current_angvel);
     }
+
 
     fn transform(&self) -> Option<&Transform3D> {
         Some(&self.body.transform)

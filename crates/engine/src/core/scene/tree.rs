@@ -1,18 +1,22 @@
+use std::collections::HashMap;
+use bevy::prelude::Vec3;
 use crate::core::physics::Transform3D;
-use crate::core::scene::{ObjectBehavior, ObjectId, RenderCommand, SceneObject, TreeCommand, TreeContext};
+use crate::core::scene::{ObjectBehavior, ObjectId, BevyCommand, SceneObject, TreeCommand, TreeContext};
 use crate::objects::Camera3D;
 use crate::core::input::InputSnapshot;
 
 pub struct ObjectTree {
     objects: Vec<Option<SceneObject>>,
+    physics_velocities: HashMap<ObjectId, (Vec3, Vec3)>,
     root: Option<ObjectId>,
-    pub pending_render_commands: Vec<RenderCommand>,
+    pub pending_render_commands: Vec<BevyCommand>,
 }
 
 impl ObjectTree {
     pub fn new() -> Self {
         Self {
             objects: Vec::new(),
+            physics_velocities: HashMap::new(),
             root: None,
             pending_render_commands: Vec::new(),
         }
@@ -73,7 +77,7 @@ impl ObjectTree {
         let mut pending_commands = Vec::new();
         let empty_input = InputSnapshot::default();
         if let Some(mut obj) = self.objects[id.0].take() {
-            let mut ctx = TreeContext::new(&self.objects, &empty_input);
+            let mut ctx = TreeContext::new(&self.objects, &self.physics_velocities, &empty_input);
             obj.behavior.start(id, &mut ctx);
             pending_commands = ctx.commands;
             self.pending_render_commands.extend(ctx.render_commands);
@@ -89,7 +93,7 @@ impl ObjectTree {
 
         for i in 0..self.objects.len() {
             if let Some(mut obj) = self.objects[i].take() {
-                let mut ctx = TreeContext::new(&self.objects, input);
+                let mut ctx = TreeContext::new(&self.objects, &self.physics_velocities, input);
                 obj.behavior.frame_tick(ObjectId(i), delta, &mut ctx);
                 all_commands.extend(ctx.commands);
                 self.pending_render_commands.extend(ctx.render_commands);
@@ -105,7 +109,7 @@ impl ObjectTree {
 
         for i in 0..self.objects.len() {
             if let Some(mut obj) = self.objects[i].take() {
-                let mut ctx = TreeContext::new(&self.objects, input);
+                let mut ctx = TreeContext::new(&self.objects, &self.physics_velocities, input);
                 obj.behavior.fixed_tick(ObjectId(i), fixed_delta, &mut ctx);
                 all_commands.extend(ctx.commands);
                 self.pending_render_commands.extend(ctx.render_commands);
@@ -142,6 +146,23 @@ impl ObjectTree {
             .as_mut()?
             .behavior
             .transform_mut()
+    }
+
+    pub(crate) fn set_physics_velocity(
+        &mut self,
+        id: ObjectId,
+        linear: Vec3,
+        angular: Vec3,
+    ) {
+        self.physics_velocities.insert(id, (linear, angular));
+    }
+
+    pub(crate) fn physics_velocity(&self, id: ObjectId) -> Option<(Vec3, Vec3)> {
+        self.physics_velocities.get(&id).copied()
+    }
+
+    pub(crate) fn remove_physics_velocity(&mut self, id: ObjectId) {
+        self.physics_velocities.remove(&id);
     }
 
     /// Finds the global Transform3D of the first active `Camera3D` in the tree.
@@ -198,11 +219,12 @@ impl ObjectTree {
 
         // 3. Call `end()` cleanup hook and guarantee Bevy visual despawn
         let empty_input = InputSnapshot::default();
-        let mut ctx = TreeContext::new(&self.objects, &empty_input);
+        let mut ctx = TreeContext::new(&self.objects, &self.physics_velocities, &empty_input);
         obj.behavior.end(id, &mut ctx);
         let cleanup_commands = ctx.commands;
         self.pending_render_commands.extend(ctx.render_commands);
-        self.pending_render_commands.push(RenderCommand::DespawnVisual(id));
+        self.pending_render_commands.push(BevyCommand::DespawnVisual(id));
+        self.remove_physics_velocity(id);
 
         // Drop `obj` before processing any commands spawned during `end()`
         drop(obj);

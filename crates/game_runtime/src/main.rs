@@ -398,7 +398,7 @@ fn main() {
         ColliderShape::Cuboid {
             half_extents: Vec3::splat(0.75),
         },
-        1.0,
+        5000.0,
     );
     cube_body.transform.translate(0.0, 4.0, 0.0);
     cube_body.transform.rotate_x(0.3);

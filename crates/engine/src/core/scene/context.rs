@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use bevy::prelude::Vec3;
 use crate::core::input::InputSnapshot;
 use crate::core::physics::{ColliderShape, PhysicsBodyType};
@@ -23,7 +24,7 @@ pub enum MeshShape {
 
 
 #[derive(Clone)]
-pub enum RenderCommand {
+pub enum BevyCommand {
     SpawnCamera {
         object_id: ObjectId,
         fov_degrees: f32,
@@ -60,18 +61,23 @@ pub enum RenderCommand {
     DespawnVisual(ObjectId),
 }
 
-
 pub struct TreeContext<'a> {
     pub(crate) objects: &'a [Option<SceneObject>],
+    pub(crate) physics_velocities: &'a HashMap<ObjectId, (Vec3, Vec3)>,
     pub(crate) commands: Vec<TreeCommand>,
     pub input: &'a InputSnapshot,
-    pub(crate) render_commands: Vec<RenderCommand>,
+    pub(crate) render_commands: Vec<BevyCommand>,
 }
 
 impl<'a> TreeContext<'a> {
-    pub(crate) fn new(objects: &'a [Option<SceneObject>], input: &'a InputSnapshot) -> Self {
+    pub(crate) fn new(
+        objects: &'a [Option<SceneObject>],
+        physics_velocities: &'a HashMap<ObjectId, (Vec3, Vec3)>,
+        input: &'a InputSnapshot,
+    ) -> Self {
         Self {
             objects,
+            physics_velocities,
             commands: Vec::new(),
             input,
             render_commands: Vec::new(),
@@ -120,7 +126,7 @@ impl<'a> TreeContext<'a> {
     // * --- Deferred Render Mutations ---
 
     pub fn spawn_camera(&mut self, object_id: ObjectId, fov_degrees: f32, near: f32, far: f32) {
-        self.render_commands.push(RenderCommand::SpawnCamera {
+        self.render_commands.push(BevyCommand::SpawnCamera {
             object_id,
             fov_degrees,
             near,
@@ -129,7 +135,7 @@ impl<'a> TreeContext<'a> {
     }
 
     pub fn spawn_mesh(&mut self, object_id: ObjectId, shape: MeshShape, color: [f32; 4]) {
-        self.render_commands.push(RenderCommand::SpawnMesh {
+        self.render_commands.push(BevyCommand::SpawnMesh {
             object_id,
             shape,
             color,
@@ -143,7 +149,7 @@ impl<'a> TreeContext<'a> {
         illuminance: f32,
         shadows_enabled: bool,
     ) {
-        self.render_commands.push(RenderCommand::SpawnDirectionalLight {
+        self.render_commands.push(BevyCommand::SpawnDirectionalLight {
             object_id,
             color,
             illuminance,
@@ -159,7 +165,7 @@ impl<'a> TreeContext<'a> {
         mass: f32,
         restitution: f32,
     ) {
-        self.render_commands.push(RenderCommand::SpawnPhysicsBody {
+        self.render_commands.push(BevyCommand::SpawnPhysicsBody {
             object_id,
             body_type,
             collider,
@@ -169,22 +175,26 @@ impl<'a> TreeContext<'a> {
     }
 
     pub fn set_body_type(&mut self, object_id: ObjectId, body_type: PhysicsBodyType) {
-        self.render_commands.push(RenderCommand::SetBodyType {
+        self.render_commands.push(BevyCommand::SetBodyType {
             object_id,
             body_type,
         });
     }
 
     pub fn set_velocity(&mut self, object_id: ObjectId, linvel: Vec3, angvel: Vec3) {
-        self.render_commands.push(RenderCommand::SetVelocity {
+        self.render_commands.push(BevyCommand::SetVelocity {
             object_id,
             linvel,
             angvel,
         });
     }
 
+    pub fn get_velocity(&self, object_id: ObjectId) -> Option<(Vec3, Vec3)> {
+        self.physics_velocities.get(&object_id).copied()
+    }
+
 
     pub fn despawn_visual(&mut self, object_id: ObjectId) {
-        self.render_commands.push(RenderCommand::DespawnVisual(object_id));
+        self.render_commands.push(BevyCommand::DespawnVisual(object_id));
     }
 }

@@ -4,14 +4,13 @@ use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
 use crate::core::input::InputSnapshot;
 use crate::core::physics::{CHUNK_SIZE, PhysicsBodyType, Transform3D};
-use crate::core::scene::{MeshShape, ObjectId, ObjectTree, RenderCommand};
+use crate::core::scene::{MeshShape, ObjectId, ObjectTree, BevyCommand};
 
 #[derive(Resource)]
 pub struct GameTree {
     pub tree: ObjectTree,
     pub entity_map: HashMap<ObjectId, Entity>,
-    spawn_commands: HashMap<ObjectId, RenderCommand>,
-    physics_velocities: HashMap<ObjectId, Velocity>,
+    spawn_commands: HashMap<ObjectId, BevyCommand>,
     pub current_input: InputSnapshot,
     pub origin_chunk: [i64; 3],
 }
@@ -22,7 +21,6 @@ impl GameTree {
             tree,
             entity_map: HashMap::new(),
             spawn_commands: HashMap::new(),
-            physics_velocities: HashMap::new(),
             current_input: InputSnapshot::default(),
             origin_chunk: [0, 0, 0]
         }
@@ -75,13 +73,13 @@ pub fn sync_tree_with_bevy(
     game.tree.update(time.delta_secs(), &input);
 
     // 2. Process any SpawnCamera, SpawnMesh, SpawnDirectionalLight, SpawnPhysicsBody, or DespawnVisual commands
-    let render_cmds: Vec<RenderCommand> = game.tree.pending_render_commands.drain(..).collect();
+    let render_cmds: Vec<BevyCommand> = game.tree.pending_render_commands.drain(..).collect();
     for cmd in render_cmds {
         let spawn_object_id = match &cmd {
-            RenderCommand::SpawnCamera { object_id, .. }
-            | RenderCommand::SpawnMesh { object_id, .. }
-            | RenderCommand::SpawnDirectionalLight { object_id, .. }
-            | RenderCommand::SpawnPhysicsBody { object_id, .. } => Some(*object_id),
+            BevyCommand::SpawnCamera { object_id, .. }
+            | BevyCommand::SpawnMesh { object_id, .. }
+            | BevyCommand::SpawnDirectionalLight { object_id, .. }
+            | BevyCommand::SpawnPhysicsBody { object_id, .. } => Some(*object_id),
             _ => None,
         };
         if let Some(object_id) = spawn_object_id {
@@ -89,7 +87,7 @@ pub fn sync_tree_with_bevy(
         }
 
         match cmd {
-            RenderCommand::SpawnCamera {
+            BevyCommand::SpawnCamera {
                 object_id,
                 fov_degrees,
                 near,
@@ -111,7 +109,7 @@ pub fn sync_tree_with_bevy(
                 game.entity_map.insert(object_id, entity);
             }
 
-            RenderCommand::SpawnMesh {
+            BevyCommand::SpawnMesh {
                 object_id,
                 shape,
                 color,
@@ -153,7 +151,7 @@ pub fn sync_tree_with_bevy(
                 game.entity_map.insert(object_id, entity);
             }
 
-            RenderCommand::SpawnDirectionalLight {
+            BevyCommand::SpawnDirectionalLight {
                 object_id,
                 color,
                 illuminance,
@@ -174,7 +172,7 @@ pub fn sync_tree_with_bevy(
                 game.entity_map.insert(object_id, entity);
             }
 
-            RenderCommand::SpawnPhysicsBody {
+            BevyCommand::SpawnPhysicsBody {
                 object_id,
                 body_type,
                 collider,
@@ -202,8 +200,9 @@ pub fn sync_tree_with_bevy(
                     })
                     .unwrap_or(Transform::IDENTITY);
                 let velocity = game
-                    .physics_velocities
-                    .remove(&object_id)
+                    .tree
+                    .physics_velocity(object_id)
+                    .map(|(linear, angular)| Velocity { linear, angular })
                     .unwrap_or_else(Velocity::zero);
 
                 let mut entity_cmds = commands.spawn((
@@ -225,7 +224,7 @@ pub fn sync_tree_with_bevy(
                 game.entity_map.insert(object_id, entity_cmds.id());
             }
 
-            RenderCommand::SetBodyType {
+            BevyCommand::SetBodyType {
                 object_id,
                 body_type,
             } => {
@@ -246,11 +245,13 @@ pub fn sync_tree_with_bevy(
                 }
             }
 
-            RenderCommand::SetVelocity {
+            BevyCommand::SetVelocity {
                 object_id,
                 linvel,
                 angvel,
             } => {
+                game.tree
+                    .set_physics_velocity(object_id, linvel, angvel);
                 if let Some(&entity) = game.entity_map.get(&object_id) {
                     commands.entity(entity).insert(Velocity {
                         linear: linvel,
@@ -259,9 +260,9 @@ pub fn sync_tree_with_bevy(
                 }
             }
 
-            RenderCommand::DespawnVisual(object_id) => {
+            BevyCommand::DespawnVisual(object_id) => {
                 game.spawn_commands.remove(&object_id);
-                game.physics_velocities.remove(&object_id);
+                game.tree.remove_physics_velocity(object_id);
                 if let Some(entity) = game.entity_map.remove(&object_id) {
                     commands.entity(entity).despawn();
                 }
@@ -276,17 +277,19 @@ pub fn sync_tree_with_bevy(
         tree,
         entity_map,
         spawn_commands,
-        physics_velocities,
         origin_chunk,
         current_input: _,
     } = &mut *game;
 
     for (&obj_id, &entity) in entity_map.iter() {
-        if let Ok((bevy_tf, is_dynamic, _)) = bevy_transforms.get(entity) {
+        if let Ok((bevy_tf, is_dynamic, velocity)) = bevy_transforms.get(entity) {
             if is_dynamic.is_some() {
                 if let Some(obj_tf) = tree.get_transform_mut(obj_id) {
                     *obj_tf = Transform3D::from_bevy_relative_to(bevy_tf, &previous_origin);
                 }
+            }
+            if let Some(velocity) = velocity {
+                tree.set_physics_velocity(obj_id, velocity.linear, velocity.angular);
             }
         }
     }
@@ -330,7 +333,7 @@ pub fn sync_tree_with_bevy(
 
     for (obj_id, entity) in entities_outside_current_chunk {
         if let Ok((_, _, Some(velocity))) = bevy_transforms.get(entity) {
-            physics_velocities.insert(obj_id, *velocity);
+            tree.set_physics_velocity(obj_id, velocity.linear, velocity.angular);
         }
         entity_map.remove(&obj_id);
         commands.entity(entity).despawn();
