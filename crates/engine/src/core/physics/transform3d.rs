@@ -1,3 +1,4 @@
+use bevy::math::{DQuat, DVec3};
 use bevy::prelude::*;
 
 pub const CHUNK_SIZE: f32 = 8192.0;
@@ -32,30 +33,101 @@ impl Transform3D {
     }
 
 
+    pub fn from_chunk(chunk: [i64; 3]) -> Self {
+        Self {
+            chunk,
+            position : [0.0, 0.0, 0.0],
+            rotation : [0.0, 0.0, 0.0, 1.0],
+            scale    : [1.0, 1.0, 1.0],
+        }
+    }
+
+    /// Returns true if `other` is within `chunk_radius` chunks on all axes (Chebyshev distance).
+    /// `chunk_radius = 0` means strictly the exact same chunk.
+    /// `chunk_radius = 1` means the current chunk plus its 26 immediate neighbours.
+    pub fn is_within_chunk_radius(&self, other: &Self, chunk_radius: i64) -> bool {
+        let radius = chunk_radius as i128;
+        (self.chunk[0] as i128 - other.chunk[0] as i128).abs() <= radius
+            && (self.chunk[1] as i128 - other.chunk[1] as i128).abs() <= radius
+            && (self.chunk[2] as i128 - other.chunk[2] as i128).abs() <= radius
+    }
 
     /// Moves the position of the transform by adding an offset to its current position.
     pub fn translate(&mut self, dx: f32, dy: f32, dz: f32) {
-        self.position[0] += dx;
-        self.position[1] += dy;
-        self.position[2] += dz;
-
-        self.normalize_chunk();
+        self.add_offset(DVec3::new(dx as f64, dy as f64, dz as f64));
     }
 
-    /// Wraps local position into [-CHUNK_SIZE/2, +CHUNK_SIZE/2] and updates chunk index.
+    /// Wraps local position into [-CHUNK_SIZE/2, CHUNK_SIZE/2) and updates chunk index.
     pub fn normalize_chunk(&mut self) {
-        let half = CHUNK_SIZE * 0.5;
-        for i in 0..3 {
-            while self.position[i] > half {
-                self.position[i] -= CHUNK_SIZE;
-                self.chunk[i] += 1;
-            }
-            while self.position[i] < -half {
-                self.position[i] += CHUNK_SIZE;
-                self.chunk[i] -= 1;
-            }
+        self.add_offset(DVec3::ZERO);
+    }
+
+    fn add_offset(&mut self, offset: DVec3) {
+        let chunk_size = CHUNK_SIZE as f64;
+        let half_chunk = chunk_size * 0.5;
+
+        for axis in 0..3 {
+            let position = self.position[axis] as f64 + offset[axis];
+            let chunk_delta = ((position + half_chunk) / chunk_size).floor() as i64;
+            self.chunk[axis] = self.chunk[axis].saturating_add(chunk_delta);
+            self.position[axis] = (position - chunk_delta as f64 * chunk_size) as f32;
         }
     }
+
+    /// Converts this Transform3D into a Bevy `Transform` relative to a camera/origin Transform3D.
+    /// Keeps the camera near (0, 0, 0) in Bevy space to eliminate floating-point jitter.
+    pub fn to_bevy_relative_to(&self, camera_origin: &Transform3D) -> Transform {
+        let [dx, dy, dz] = camera_origin.delta_to(self);
+        Transform {
+            translation: Vec3::new(dx as f32, dy as f32, dz as f32),
+            rotation: Quat::from_array(self.rotation),
+            scale: Vec3::from_array(self.scale),
+        }
+    }
+
+    pub fn from_bevy_relative_to(bevy_tf: &Transform, origin: &Transform3D) -> Self {
+        let mut world = Self {
+            chunk: origin.chunk,
+            position: origin.position,
+            rotation: bevy_tf.rotation.to_array(),
+            scale: bevy_tf.scale.to_array(),
+        };
+        world.translate(
+            bevy_tf.translation.x,
+            bevy_tf.translation.y,
+            bevy_tf.translation.z,
+        );
+        world
+    }
+
+    /// Combines a parent's global Transform3D with a child's local Transform3D.
+    pub fn combine(&self, local: &Transform3D) -> Transform3D {
+        let parent_rot = DQuat::from_xyzw(
+            self.rotation[0] as f64,
+            self.rotation[1] as f64,
+            self.rotation[2] as f64,
+            self.rotation[3] as f64,
+        );
+        let local_offset = DVec3::new(
+            local.chunk[0] as f64 * CHUNK_SIZE as f64 + local.position[0] as f64,
+            local.chunk[1] as f64 * CHUNK_SIZE as f64 + local.position[1] as f64,
+            local.chunk[2] as f64 * CHUNK_SIZE as f64 + local.position[2] as f64,
+        );
+        let parent_scale = DVec3::new(
+            self.scale[0] as f64,
+            self.scale[1] as f64,
+            self.scale[2] as f64,
+        );
+
+        let mut global = *self;
+        global.add_offset(parent_rot * (local_offset * parent_scale));
+        global.rotation = (Quat::from_array(self.rotation) * Quat::from_array(local.rotation))
+            .normalize()
+            .to_array();
+        global.scale = (Vec3::from_array(self.scale) * Vec3::from_array(local.scale)).to_array();
+        global
+    }
+
 
 
 
@@ -127,11 +199,11 @@ impl Transform3D {
     pub fn delta_to(&self, other: &Self) -> [f64; 3] {
         let chunk_size = CHUNK_SIZE as f64;
         [
-            (other.chunk[0] as f64 - self.chunk[0] as f64) * chunk_size
+            (other.chunk[0] as i128 - self.chunk[0] as i128) as f64 * chunk_size
                 + (other.position[0] as f64 - self.position[0] as f64),
-            (other.chunk[1] as f64 - self.chunk[1] as f64) * chunk_size
+            (other.chunk[1] as i128 - self.chunk[1] as i128) as f64 * chunk_size
                 + (other.position[1] as f64 - self.position[1] as f64),
-            (other.chunk[2] as f64 - self.chunk[2] as f64) * chunk_size
+            (other.chunk[2] as i128 - self.chunk[2] as i128) as f64 * chunk_size
                 + (other.position[2] as f64 - self.position[2] as f64),
         ]
     }

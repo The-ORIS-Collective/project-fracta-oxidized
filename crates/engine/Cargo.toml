@@ -6,6 +6,10 @@ edition = "2024"
 [dependencies]
 bevy = { version = "0.20.1", default-features = false, features = [
     "3d",
+    "bevy_ui",
+    "bevy_ui_render",
+    "bevy_text",
+    "default_font",
     "wayland",
     "x11",
 ] }
